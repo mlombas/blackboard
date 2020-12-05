@@ -1,9 +1,9 @@
-#Blackboard
+# Blackboard
 This crate includes a class to use a blackboard pattern in rust.  
 This pattern consists of a blackboard object, that has sections. Programs can get the content of a section,
 put content on a section, or subscribe to be notified when a section changes.
 
-#Example
+# Example
 ```Rust
 use blackboard::BlackBoard;
 
