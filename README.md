@@ -36,4 +36,3 @@ fn main() {
     assert!(found_betsie);
 }
 ```
-

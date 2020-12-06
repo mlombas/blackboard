@@ -1,15 +1,34 @@
 use std::hash::Hash;
 use std::collections::HashMap;
+use std::rc::Rc;
+
+///To be implemented by subscriptors, any FnMut(&mut T) closure automatically implements this
+pub trait Subscriptor<T> {
+    fn notify(&mut self, what: &mut T);
+}
+
+impl<T, F> Subscriptor<T> for F 
+    where F: FnMut(&mut T)
+{
+    ///Notifies the Subscriptor with a type
+    fn notify(&mut self, what: &mut T) {
+        self(what);
+    }
+}
+
 
 ///Represents a blackboard where processes can post and get items in sections, and also subscribe
 ///for changes in a specific section.
 pub struct BlackBoard<'a, Section: Hash + Eq, Type> {
     map: HashMap<
         Section,
-        (Vec<Type>, Vec<Box<dyn FnMut(&Type) + 'a>>)>
+        (Vec<Type>, Vec<Rc<dyn Subscriptor<Type> + 'a>>)
+    >
 }
 
-impl<'a, Section: Hash + Eq, Type> BlackBoard<'a, Section, Type> {
+impl<'a, Section, Type> BlackBoard<'a, Section, Type> 
+    where Section: Hash + Eq
+{
     ///Generates a new, empty blackboard
     pub fn new() -> Self {
         BlackBoard { map: HashMap::new() }
@@ -30,11 +49,14 @@ impl<'a, Section: Hash + Eq, Type> BlackBoard<'a, Section, Type> {
     }
 
     ///Posts data on the desired section. Note that data is consumed
-    pub fn post(&mut self, section: Section, what: Type) {
-        let (things, events) = self.get_raw_section(section);
+    pub fn post(&mut self, section: Section, mut what: Type) {
+        let (things, subscriptors) = self.get_raw_section(section);
 
-        for event in events {
-            event(&what);
+        for subscriptor in subscriptors {
+            //Only notify valid ones
+            if let Some(subscriptor) = Rc::get_mut(subscriptor) {
+                subscriptor.notify(&mut what);
+            }
         }
 
         things.push(what);
@@ -42,16 +64,33 @@ impl<'a, Section: Hash + Eq, Type> BlackBoard<'a, Section, Type> {
 
     ///Suscribes a function to the specified section. When a post to that section occurs, the
     ///function passed in is called with the newly posted value as argument
-    pub fn subscribe(&mut self, section: Section, on_event: impl FnMut(&Type) + 'a) {
+    pub fn subscribe(
+        &mut self,
+        section: Section,
+        subscriptor: impl Subscriptor<Type> + 'a
+        )
+    {
+        self.subscribe_rc(
+            section,
+            &Rc::new(subscriptor)
+        );
+    }
+
+    pub fn subscribe_rc(
+        &mut self,
+        section: Section,
+        subscriptor: &Rc<impl Subscriptor<Type> + 'a>
+        )
+    {
         self.get_raw_section(section)
             .1
             .push(
-                Box::new(on_event)
+                Rc::clone(subscriptor) as Rc<dyn Subscriptor<Type>>
             );
     }
 
     fn get_raw_section(&mut self, section: Section) -> 
-        &mut (Vec<Type>, Vec<Box<dyn FnMut(&Type) + 'a>>) 
+        &mut (Vec<Type>, Vec<Rc<dyn Subscriptor<Type> + 'a>>) 
     {
         self.map.entry(section)
             .or_insert((
@@ -62,7 +101,9 @@ impl<'a, Section: Hash + Eq, Type> BlackBoard<'a, Section, Type> {
 }
 
 //Its important to drop as soon as we can so closures dont mess up everything
-impl<'a, Section: Hash + Eq, Type> Drop for BlackBoard<'a, Section, Type> {
+impl<'a, Section, Type> Drop for BlackBoard<'a, Section, Type>
+    where Section: Hash + Eq
+{
     fn drop(&mut self) {}
 }
 
